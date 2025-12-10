@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
@@ -35,6 +36,16 @@
     }
     .menu-btn { transition: all 0.2s; }
     .menu-btn:active { transform: scale(0.97); }
+    .status-btn { transition: all 0.15s; }
+    .status-btn:active { transform: scale(0.95); }
+    .arrived { background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); }
+    .coming { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); }
+    .absent { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); }
+    .pulse-dot { animation: pulse 2s infinite; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
   </style>
 </head>
 <body class="bg-gray-100 min-h-screen">
@@ -86,8 +97,15 @@
       '상담실습': { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', badge: 'bg-emerald-100 text-emerald-700', solid: 'bg-emerald-500' },
     };
 
+    const 출석상태 = {
+      'waiting': { label: '대기', icon: '⏳', color: 'bg-gray-100 text-gray-600', border: 'border-gray-200' },
+      'arrived': { label: '도착', icon: '✅', color: 'bg-blue-500 text-white', border: 'border-blue-500' },
+      'coming': { label: '이동중', icon: '🚗', color: 'bg-amber-500 text-white', border: 'border-amber-500' },
+      'absent': { label: '불참', icon: '❌', color: 'bg-red-500 text-white', border: 'border-red-500' },
+    };
+
     // 상태 변수
-    let 현재모드 = 'main'; // main, info, learn, quiz, result
+    let 현재모드 = 'main';
     let 선택과목 = '전체';
     let 검색어 = '';
     let 펼침상태 = {};
@@ -98,6 +116,31 @@
     let 카드뒤집힘 = false;
     let 퀴즈정답 = null;
     let 선택된답 = null;
+    let 출석데이터 = {};
+    let 출석필터 = '전체';
+
+    // 출석 데이터 로드/저장
+    function 출석로드() {
+      try {
+        const saved = localStorage.getItem('강사출석데이터');
+        if (saved) 출석데이터 = JSON.parse(saved);
+      } catch(e) {}
+    }
+    function 출석저장() {
+      try {
+        localStorage.setItem('강사출석데이터', JSON.stringify(출석데이터));
+      } catch(e) {}
+    }
+    function get출석(id) {
+      return 출석데이터[id] || 'waiting';
+    }
+    function set출석(id, status) {
+      출석데이터[id] = status;
+      출석저장();
+      render();
+    }
+
+    출석로드();
 
     // 유틸리티 함수
     function 셔플(array) {
@@ -112,11 +155,16 @@
     function 필터링() {
       return 참가자데이터.filter(p => {
         const 과목일치 = 선택과목 === '전체' || p.과목 === 선택과목;
-        const 검색일치 = 검색어 === '' || 
-          p.이름.includes(검색어) || 
-          p.소속.includes(검색어) || 
-          p.지역.includes(검색어);
+        const 검색일치 = 검색어 === '' || p.이름.includes(검색어) || p.소속.includes(검색어) || p.지역.includes(검색어);
         return 과목일치 && 검색일치;
+      });
+    }
+
+    function 출석필터링() {
+      return 참가자데이터.filter(p => {
+        const 과목일치 = 선택과목 === '전체' || p.과목 === 선택과목;
+        const 상태일치 = 출석필터 === '전체' || get출석(p.id) === 출석필터;
+        return 과목일치 && 상태일치;
       });
     }
 
@@ -132,16 +180,26 @@
       return Object.values(groups);
     }
 
-    function getPhoto(name) {
+    function getPhoto(name, size = 'w-14 h-14') {
       if (강사사진[name]) {
-        return `<img src="${강사사진[name]}" alt="${name}" class="w-14 h-14 rounded-full object-cover border-2 border-white shadow-md flex-shrink-0">`;
+        return `<img src="${강사사진[name]}" alt="${name}" class="${size} rounded-full object-cover border-2 border-white shadow-md flex-shrink-0">`;
       }
-      return `<div class="w-14 h-14 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold flex-shrink-0 border-2 border-white shadow-md">${name.charAt(0)}</div>`;
+      return `<div class="${size} rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold flex-shrink-0 border-2 border-white shadow-md">${name.charAt(0)}</div>`;
+    }
+
+    function 출석통계() {
+      const stats = { waiting: 0, arrived: 0, coming: 0, absent: 0 };
+      참가자데이터.forEach(p => {
+        const status = get출석(p.id);
+        stats[status]++;
+      });
+      return stats;
     }
 
     // 모드 전환 함수
     function 메인으로() { 현재모드 = 'main'; render(); }
     function 정보보기() { 현재모드 = 'info'; render(); }
+    function 출석체크() { 현재모드 = 'attendance'; 선택과목 = '전체'; 출석필터 = '전체'; render(); }
     
     function 학습시작() {
       현재모드 = 'learn';
@@ -170,11 +228,8 @@
         선택된답 = null;
         render();
       } else {
-        if (현재모드 === 'quiz') {
-          현재모드 = 'result';
-        } else {
-          현재모드 = 'main';
-        }
+        if (현재모드 === 'quiz') 현재모드 = 'result';
+        else 현재모드 = 'main';
         render();
       }
     }
@@ -187,17 +242,14 @@
       }
     }
 
-    function 카드뒤집기() {
-      카드뒤집힘 = !카드뒤집힘;
-      render();
-    }
+    function 카드뒤집기() { 카드뒤집힘 = !카드뒤집힘; render(); }
 
     function 정답선택(선택) {
       if (퀴즈정답 !== null) return;
       선택된답 = 선택;
       const 현재강사 = 셔플된목록[현재인덱스];
       퀴즈정답 = 선택 === 현재강사.이름;
-      if (퀴즈정답) { 정답수++; } else { 오답목록.push(현재강사); }
+      if (퀴즈정답) 정답수++; else 오답목록.push(현재강사);
       render();
       setTimeout(() => { 다음카드(); }, 1500);
     }
@@ -211,18 +263,27 @@
     }
 
     function set과목(과목) { 선택과목 = 과목; render(); }
+    function set출석필터(필터) { 출석필터 = 필터; render(); }
     function toggle펼침(key) { 펼침상태[key] = 펼침상태[key] === false ? true : false; render(); }
+    
+    function 출석초기화() {
+      if (confirm('모든 출석 정보를 초기화할까요?')) {
+        출석데이터 = {};
+        출석저장();
+        render();
+      }
+    }
 
     // 렌더링 함수
     function render() {
       const app = document.getElementById('app');
       if (현재모드 === 'main') app.innerHTML = renderMain();
       else if (현재모드 === 'info') app.innerHTML = renderInfo();
+      else if (현재모드 === 'attendance') app.innerHTML = renderAttendance();
       else if (현재모드 === 'learn') app.innerHTML = renderLearn();
       else if (현재모드 === 'quiz') app.innerHTML = renderQuiz();
       else if (현재모드 === 'result') app.innerHTML = renderResult();
       
-      // 검색 입력 이벤트 재연결
       const searchInput = document.getElementById('searchInput');
       if (searchInput) {
         searchInput.addEventListener('input', (e) => {
@@ -234,69 +295,190 @@
     }
 
     function renderMain() {
+      const stats = 출석통계();
       return `
         <div class="min-h-screen bg-gradient-to-b from-indigo-600 to-purple-700 flex flex-col">
-          <!-- 헤더 -->
-          <div class="text-center pt-10 pb-6">
+          <div class="text-center pt-8 pb-4">
             <h1 class="text-2xl font-bold text-white">2025 강사평가회의</h1>
             <p class="text-indigo-200 mt-1">참가자 관리 시스템</p>
           </div>
           
-          <!-- 참가자 미리보기 -->
-          <div class="flex justify-center gap-1 px-4 mb-6">
-            ${참가자데이터.slice(0, 8).map(g => `
-              <img src="${강사사진[g.이름]}" class="w-10 h-10 rounded-full object-cover border-2 border-white/30">
-            `).join('')}
+          <!-- 출석 현황 요약 -->
+          <div class="mx-6 mb-4 bg-white/10 backdrop-blur rounded-2xl p-4">
+            <div class="flex justify-around text-center">
+              <div>
+                <p class="text-2xl font-bold text-white">${stats.arrived}</p>
+                <p class="text-xs text-indigo-200">✅ 도착</p>
+              </div>
+              <div>
+                <p class="text-2xl font-bold text-amber-300">${stats.coming}</p>
+                <p class="text-xs text-indigo-200">🚗 이동중</p>
+              </div>
+              <div>
+                <p class="text-2xl font-bold text-gray-300">${stats.waiting}</p>
+                <p class="text-xs text-indigo-200">⏳ 대기</p>
+              </div>
+              <div>
+                <p class="text-2xl font-bold text-red-300">${stats.absent}</p>
+                <p class="text-xs text-indigo-200">❌ 불참</p>
+              </div>
+            </div>
           </div>
           
-          <!-- 메뉴 버튼들 -->
-          <div class="flex-1 px-6 pb-10">
-            <div class="bg-white/10 backdrop-blur rounded-3xl p-6 space-y-4">
+          <div class="flex justify-center gap-1 px-4 mb-4">
+            ${참가자데이터.slice(0, 8).map(g => {
+              const status = get출석(g.id);
+              const ring = status === 'arrived' ? 'ring-2 ring-blue-400' : status === 'coming' ? 'ring-2 ring-amber-400' : status === 'absent' ? 'ring-2 ring-red-400 opacity-50' : '';
+              return `<img src="${강사사진[g.이름]}" class="w-9 h-9 rounded-full object-cover border-2 border-white/30 ${ring}">`;
+            }).join('')}
+          </div>
+          
+          <div class="flex-1 px-6 pb-8">
+            <div class="bg-white/10 backdrop-blur rounded-3xl p-5 space-y-3">
               
-              <!-- 강사 정보 보기 -->
-              <button onclick="정보보기()" class="menu-btn w-full py-5 bg-white rounded-2xl shadow-lg flex items-center px-5">
-                <div class="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center text-2xl">📋</div>
+              <button onclick="출석체크()" class="menu-btn w-full py-4 bg-gradient-to-r from-blue-500 to-blue-600 rounded-2xl shadow-lg flex items-center px-5">
+                <div class="w-11 h-11 bg-white/20 rounded-xl flex items-center justify-center text-xl">✅</div>
                 <div class="ml-4 text-left">
-                  <p class="font-bold text-gray-800">강사 정보 보기</p>
-                  <p class="text-sm text-gray-500">과목별 강사 정보 및 연락처</p>
+                  <p class="font-bold text-white">출석 체크</p>
+                  <p class="text-sm text-blue-100">도착/이동중/불참 관리</p>
+                </div>
+                <div class="ml-auto text-right">
+                  <p class="text-xl font-bold text-white">${stats.arrived}/${참가자데이터.length}</p>
                 </div>
               </button>
               
-              <!-- 얼굴 학습하기 -->
-              <button onclick="학습시작()" class="menu-btn w-full py-5 bg-white rounded-2xl shadow-lg flex items-center px-5">
-                <div class="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center text-2xl">📚</div>
+              <button onclick="정보보기()" class="menu-btn w-full py-4 bg-white rounded-2xl shadow-lg flex items-center px-5">
+                <div class="w-11 h-11 bg-indigo-100 rounded-xl flex items-center justify-center text-xl">📋</div>
                 <div class="ml-4 text-left">
-                  <p class="font-bold text-gray-800">얼굴 학습하기</p>
-                  <p class="text-sm text-gray-500">플래시카드로 이름·과목·소속 암기</p>
+                  <p class="font-bold text-gray-800">강사 정보</p>
+                  <p class="text-sm text-gray-500">상세정보 및 연락처</p>
                 </div>
               </button>
               
-              <!-- 퀴즈 풀기 -->
-              <button onclick="퀴즈시작()" class="menu-btn w-full py-5 bg-white rounded-2xl shadow-lg flex items-center px-5">
-                <div class="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center text-2xl">🎯</div>
+              <button onclick="학습시작()" class="menu-btn w-full py-4 bg-white rounded-2xl shadow-lg flex items-center px-5">
+                <div class="w-11 h-11 bg-amber-100 rounded-xl flex items-center justify-center text-xl">📚</div>
                 <div class="ml-4 text-left">
-                  <p class="font-bold text-gray-800">퀴즈 풀기</p>
-                  <p class="text-sm text-gray-500">얼굴 보고 이름 맞추기</p>
+                  <p class="font-bold text-gray-800">얼굴 학습</p>
+                  <p class="text-sm text-gray-500">플래시카드로 암기</p>
+                </div>
+              </button>
+              
+              <button onclick="퀴즈시작()" class="menu-btn w-full py-4 bg-white rounded-2xl shadow-lg flex items-center px-5">
+                <div class="w-11 h-11 bg-emerald-100 rounded-xl flex items-center justify-center text-xl">🎯</div>
+                <div class="ml-4 text-left">
+                  <p class="font-bold text-gray-800">퀴즈</p>
+                  <p class="text-sm text-gray-500">이름 맞추기</p>
                 </div>
               </button>
               
             </div>
-            
-            <!-- 통계 -->
-            <div class="mt-6 flex justify-around text-center">
-              <div>
-                <p class="text-3xl font-bold text-white">16</p>
-                <p class="text-indigo-200 text-sm">참가자</p>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderAttendance() {
+      const 필터된데이터 = 출석필터링();
+      const 과목별그룹 = 그룹화(필터된데이터);
+      const stats = 출석통계();
+
+      return `
+        <div class="min-h-screen bg-gray-100">
+          <header class="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-4 sticky top-0 z-10 shadow-lg">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center">
+                <button onclick="메인으로()" class="mr-3 p-1">
+                  <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                </button>
+                <div>
+                  <h1 class="text-lg font-bold">출석 체크</h1>
+                  <p class="text-blue-200 text-xs">도착 ${stats.arrived}명 / 전체 ${참가자데이터.length}명</p>
+                </div>
               </div>
-              <div>
-                <p class="text-3xl font-bold text-white">4</p>
-                <p class="text-indigo-200 text-sm">과목</p>
-              </div>
-              <div>
-                <p class="text-3xl font-bold text-white">2</p>
-                <p class="text-indigo-200 text-sm">일정</p>
-              </div>
+              <button onclick="출석초기화()" class="text-xs bg-white/20 px-3 py-1.5 rounded-lg">초기화</button>
             </div>
+          </header>
+
+          <!-- 상태 요약 바 -->
+          <div class="bg-white p-3 border-b flex justify-around">
+            ${Object.entries(출석상태).map(([key, val]) => `
+              <button onclick="set출석필터('${key}')" class="text-center px-3 py-1 rounded-lg ${출석필터 === key ? val.color : 'text-gray-500'}">
+                <p class="text-lg">${val.icon}</p>
+                <p class="text-xs font-medium">${Object.values(출석데이터).filter(s => s === key).length || (key === 'waiting' ? 참가자데이터.length - Object.keys(출석데이터).length : 0)}</p>
+              </button>
+            `).join('')}
+            <button onclick="set출석필터('전체')" class="text-center px-3 py-1 rounded-lg ${출석필터 === '전체' ? 'bg-gray-800 text-white' : 'text-gray-500'}">
+              <p class="text-lg">👥</p>
+              <p class="text-xs font-medium">${참가자데이터.length}</p>
+            </button>
+          </div>
+
+          <!-- 과목 필터 -->
+          <div class="p-3 bg-white border-b overflow-x-auto">
+            <div class="flex gap-2 min-w-max">
+              ${['전체', '부모상담', '학업', '진로', '상담실습'].map(과목 => `
+                <button onclick="set과목('${과목}')" class="px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap ${선택과목 === 과목 ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'}">
+                  ${과목}
+                </button>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- 참가자 목록 -->
+          <div class="p-3 space-y-3">
+            ${과목별그룹.map(그룹 => {
+              const 색상 = 과목색상[그룹.과목];
+              const 그룹도착수 = 그룹.참가자.filter(p => get출석(p.id) === 'arrived').length;
+              return `
+                <div class="rounded-xl overflow-hidden shadow-sm border ${색상.border} card-enter">
+                  <div class="${색상.bg} p-3 flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                      <span class="px-2.5 py-1 rounded-lg text-sm font-bold ${색상.badge}">${그룹.과목}</span>
+                      <span class="text-sm text-gray-600">${그룹.날짜} ${그룹.시간}</span>
+                    </div>
+                    <span class="text-sm font-bold ${색상.text}">${그룹도착수}/${그룹.참가자.length}</span>
+                  </div>
+                  <div class="bg-white divide-y divide-gray-100">
+                    ${그룹.참가자.map(p => {
+                      const status = get출석(p.id);
+                      const statusInfo = 출석상태[status];
+                      const isArrived = status === 'arrived';
+                      const cardBg = isArrived ? 'bg-blue-50' : status === 'coming' ? 'bg-amber-50' : status === 'absent' ? 'bg-red-50 opacity-60' : 'bg-white';
+                      
+                      return `
+                        <div class="p-3 ${cardBg} transition-colors">
+                          <div class="flex items-center gap-3">
+                            <div class="relative">
+                              ${getPhoto(p.이름, 'w-14 h-14')}
+                              <span class="absolute -bottom-1 -right-1 text-lg">${statusInfo.icon}</span>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                              <div class="flex items-center gap-2">
+                                <span class="font-bold ${isArrived ? 'text-blue-700' : 'text-gray-900'}">${p.이름}</span>
+                                <span class="text-sm text-gray-500">${p.직위}</span>
+                              </div>
+                              <p class="text-sm text-gray-600 truncate">${p.소속}</p>
+                            </div>
+                          </div>
+                          <!-- 상태 버튼 -->
+                          <div class="flex gap-2 mt-3">
+                            <button onclick="set출석(${p.id}, 'arrived')" class="status-btn flex-1 py-2 rounded-lg text-sm font-medium ${status === 'arrived' ? 'arrived text-white shadow-md' : 'bg-gray-100 text-gray-600'}">
+                              ✅ 도착
+                            </button>
+                            <button onclick="set출석(${p.id}, 'coming')" class="status-btn flex-1 py-2 rounded-lg text-sm font-medium ${status === 'coming' ? 'coming text-white shadow-md' : 'bg-gray-100 text-gray-600'}">
+                              🚗 이동중
+                            </button>
+                            <button onclick="set출석(${p.id}, 'absent')" class="status-btn flex-1 py-2 rounded-lg text-sm font-medium ${status === 'absent' ? 'absent text-white shadow-md' : 'bg-gray-100 text-gray-600'}">
+                              ❌ 불참
+                            </button>
+                          </div>
+                        </div>
+                      `;
+                    }).join('')}
+                  </div>
+                </div>
+              `;
+            }).join('')}
           </div>
         </div>
       `;
@@ -305,11 +487,9 @@
     function renderInfo() {
       const 필터링된데이터 = 필터링();
       const 과목별그룹 = 그룹화(필터링된데이터);
-      const 과목목록 = ['전체', '부모상담', '학업', '진로', '상담실습'];
 
       return `
         <div class="min-h-screen bg-gray-100">
-          <!-- 헤더 -->
           <header class="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-4 sticky top-0 z-10 shadow-lg">
             <div class="flex items-center">
               <button onclick="메인으로()" class="mr-3 p-1">
@@ -322,42 +502,32 @@
             </div>
           </header>
 
-          <!-- 검색 -->
           <div class="p-3 bg-white border-b">
             <div class="relative">
               <svg class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
               </svg>
               <input type="text" id="searchInput" placeholder="이름, 소속, 지역 검색..." value="${검색어}"
-                class="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 text-sm"/>
+                class="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm"/>
             </div>
           </div>
 
-          <!-- 과목 필터 -->
           <div class="p-3 bg-white border-b overflow-x-auto">
             <div class="flex gap-2 min-w-max">
-              ${과목목록.map(과목 => `
-                <button onclick="set과목('${과목}')"
-                  class="px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap ${
-                    선택과목 === 과목 ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-100 text-gray-600'
-                  }">
-                  ${과목}${과목 !== '전체' ? `<span class="ml-1 opacity-70">(${참가자데이터.filter(p => p.과목 === 과목).length})</span>` : ''}
+              ${['전체', '부모상담', '학업', '진로', '상담실습'].map(과목 => `
+                <button onclick="set과목('${과목}')" class="px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap ${선택과목 === 과목 ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'}">
+                  ${과목}
                 </button>
               `).join('')}
             </div>
           </div>
 
-          <!-- 참가자 목록 -->
           <div class="p-3 space-y-3">
-            ${과목별그룹.length === 0 ? `
-              <div class="text-center py-10 text-gray-500">
-                <p>검색 결과가 없습니다</p>
-              </div>
-            ` : 과목별그룹.map(그룹 => {
+            ${과목별그룹.map(그룹 => {
               const 색상 = 과목색상[그룹.과목];
               const 펼침 = 펼침상태[그룹.key] !== false;
               return `
-                <div class="rounded-xl overflow-hidden shadow-sm border ${색상.border} card-enter">
+                <div class="rounded-xl overflow-hidden shadow-sm border ${색상.border}">
                   <button onclick="toggle펼침('${그룹.key}')" class="w-full ${색상.bg} p-3 flex items-center justify-between">
                     <div class="flex items-center gap-2">
                       <span class="px-2.5 py-1 rounded-lg text-sm font-bold ${색상.badge}">${그룹.과목}</span>
@@ -372,25 +542,33 @@
                   </button>
                   ${펼침 ? `
                     <div class="bg-white divide-y divide-gray-100">
-                      ${그룹.참가자.map(p => `
-                        <div class="p-3">
-                          <div class="flex items-start gap-3">
-                            ${getPhoto(p.이름)}
-                            <div class="flex-1 min-w-0">
-                              <div class="flex items-center gap-2 flex-wrap">
-                                <span class="font-bold text-gray-900">${p.이름}</span>
-                                <span class="text-sm text-gray-500">${p.직위}</span>
-                                ${p.기타 ? `<span class="text-xs px-1.5 py-0.5 rounded ${p.기타 === '점심X' ? 'bg-red-100 text-red-600' : p.기타.includes('과목교체') ? 'bg-purple-100 text-purple-700' : 'bg-yellow-100 text-yellow-700'}">${p.기타}</span>` : ''}
+                      ${그룹.참가자.map(p => {
+                        const status = get출석(p.id);
+                        const statusInfo = 출석상태[status];
+                        const cardBg = status === 'arrived' ? 'bg-blue-50' : status === 'coming' ? 'bg-amber-50' : '';
+                        return `
+                          <div class="p-3 ${cardBg}">
+                            <div class="flex items-start gap-3">
+                              <div class="relative">
+                                ${getPhoto(p.이름)}
+                                ${status !== 'waiting' ? `<span class="absolute -bottom-1 -right-1 text-sm">${statusInfo.icon}</span>` : ''}
                               </div>
-                              <p class="text-sm text-gray-600 truncate mt-0.5">${p.소속}</p>
-                              <p class="text-sm text-gray-500 mt-0.5">${p.지역}</p>
+                              <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 flex-wrap">
+                                  <span class="font-bold text-gray-900">${p.이름}</span>
+                                  <span class="text-sm text-gray-500">${p.직위}</span>
+                                  ${p.기타 ? `<span class="text-xs px-1.5 py-0.5 rounded ${p.기타 === '점심X' ? 'bg-red-100 text-red-600' : p.기타.includes('과목교체') ? 'bg-purple-100 text-purple-700' : 'bg-yellow-100 text-yellow-700'}">${p.기타}</span>` : ''}
+                                </div>
+                                <p class="text-sm text-gray-600 truncate mt-0.5">${p.소속}</p>
+                                <p class="text-sm text-gray-500 mt-0.5">${p.지역}</p>
+                              </div>
+                              <a href="tel:${p.전화}" class="p-2.5 bg-green-500 text-white rounded-full shadow-md flex-shrink-0">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/></svg>
+                              </a>
                             </div>
-                            <a href="tel:${p.전화}" class="p-2.5 bg-green-500 text-white rounded-full shadow-md flex-shrink-0 self-center">
-                              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/></svg>
-                            </a>
                           </div>
-                        </div>
-                      `).join('')}
+                        `;
+                      }).join('')}
                     </div>
                   ` : ''}
                 </div>
@@ -404,21 +582,14 @@
     function renderLearn() {
       const 강사 = 셔플된목록[현재인덱스];
       const 색상 = 과목색상[강사.과목];
-      
       return `
         <div class="min-h-screen bg-gray-100 flex flex-col">
           <div class="bg-white p-4 flex items-center justify-between shadow-sm">
-            <button onclick="메인으로()" class="text-gray-500 p-2">
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-            </button>
+            <button onclick="메인으로()" class="text-gray-500 p-2"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
             <span class="font-bold text-lg">${현재인덱스 + 1} / ${셔플된목록.length}</span>
             <div class="w-10"></div>
           </div>
-          
-          <div class="h-1 bg-gray-200">
-            <div class="h-full bg-indigo-500 transition-all" style="width: ${((현재인덱스 + 1) / 셔플된목록.length) * 100}%"></div>
-          </div>
-          
+          <div class="h-1 bg-gray-200"><div class="h-full bg-indigo-500 transition-all" style="width: ${((현재인덱스 + 1) / 셔플된목록.length) * 100}%"></div></div>
           <div class="flex-1 flex items-center justify-center p-6">
             <div class="flip-card w-full max-w-sm h-96 ${카드뒤집힘 ? 'flipped' : ''}" onclick="카드뒤집기()">
               <div class="flip-card-inner w-full h-full relative">
@@ -435,7 +606,6 @@
               </div>
             </div>
           </div>
-          
           <div class="p-6 flex justify-between">
             <button onclick="이전카드()" class="px-6 py-3 bg-gray-200 text-gray-600 rounded-xl font-medium ${현재인덱스 === 0 ? 'opacity-30' : ''}" ${현재인덱스 === 0 ? 'disabled' : ''}>← 이전</button>
             <button onclick="다음카드()" class="px-6 py-3 bg-indigo-500 text-white rounded-xl font-medium">${현재인덱스 === 셔플된목록.length - 1 ? '완료' : '다음 →'}</button>
@@ -447,30 +617,21 @@
     function renderQuiz() {
       const 강사 = 셔플된목록[현재인덱스];
       let 보기 = [강사.이름];
-      const 다른강사 = 참가자데이터.filter(g => g.이름 !== 강사.이름);
-      보기.push(...셔플(다른강사).slice(0, 3).map(g => g.이름));
+      보기.push(...셔플(참가자데이터.filter(g => g.이름 !== 강사.이름)).slice(0, 3).map(g => g.이름));
       보기 = 셔플(보기);
-      
       return `
         <div class="min-h-screen bg-gray-100 flex flex-col">
           <div class="bg-white p-4 flex items-center justify-between shadow-sm">
-            <button onclick="메인으로()" class="text-gray-500 p-2">
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-            </button>
+            <button onclick="메인으로()" class="text-gray-500 p-2"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
             <span class="font-bold">${현재인덱스 + 1} / ${셔플된목록.length}</span>
             <span class="text-green-600 font-bold">${정답수}점</span>
           </div>
-          
-          <div class="h-1 bg-gray-200">
-            <div class="h-full bg-amber-400 transition-all" style="width: ${((현재인덱스 + 1) / 셔플된목록.length) * 100}%"></div>
-          </div>
-          
+          <div class="h-1 bg-gray-200"><div class="h-full bg-amber-400 transition-all" style="width: ${((현재인덱스 + 1) / 셔플된목록.length) * 100}%"></div></div>
           <div class="flex-1 flex flex-col items-center justify-center p-6">
             <p class="text-gray-500 mb-4">이 분의 이름은?</p>
             <div class="w-48 h-48 rounded-full overflow-hidden shadow-xl mb-6 ${퀴즈정답 === true ? 'correct ring-4 ring-green-400' : ''} ${퀴즈정답 === false ? 'shake ring-4 ring-red-400' : ''}">
               <img src="${강사사진[강사.이름]}" class="w-full h-full object-cover">
             </div>
-            
             ${퀴즈정답 !== null ? `
               <div class="text-center mb-4">
                 <p class="text-2xl font-bold ${퀴즈정답 ? 'text-green-500' : 'text-red-500'}">${퀴즈정답 ? '정답! 🎉' : '오답 😢'}</p>
@@ -478,7 +639,6 @@
                 <p class="text-sm text-gray-500 mt-1">${강사.과목} · ${강사.소속}</p>
               </div>
             ` : ''}
-            
             <div class="w-full max-w-sm grid grid-cols-2 gap-3">
               ${보기.map(이름 => {
                 let cls = 'bg-white border-2 border-gray-200 text-gray-700';
@@ -502,7 +662,6 @@
       else if (점수 >= 80) { 메시지 = '훌륭해요!'; 이모지 = '🎉'; }
       else if (점수 >= 60) { 메시지 = '잘했어요!'; 이모지 = '👍'; }
       else { 메시지 = '더 연습해요!'; 이모지 = '💪'; }
-      
       return `
         <div class="min-h-screen bg-gradient-to-b from-indigo-600 to-purple-700 flex flex-col items-center justify-center p-6">
           <div class="text-6xl mb-4">${이모지}</div>
@@ -520,12 +679,7 @@
             <div class="mt-8">
               <p class="text-indigo-200 text-sm mb-3 text-center">틀린 강사</p>
               <div class="flex gap-2 flex-wrap justify-center">
-                ${오답목록.map(g => `
-                  <div class="flex flex-col items-center">
-                    <img src="${강사사진[g.이름]}" class="w-12 h-12 rounded-full object-cover border-2 border-red-400">
-                    <span class="text-white text-xs mt-1">${g.이름}</span>
-                  </div>
-                `).join('')}
+                ${오답목록.map(g => `<div class="flex flex-col items-center"><img src="${강사사진[g.이름]}" class="w-12 h-12 rounded-full object-cover border-2 border-red-400"><span class="text-white text-xs mt-1">${g.이름}</span></div>`).join('')}
               </div>
             </div>
           ` : ''}
@@ -535,5 +689,6 @@
 
     render();
   </script>
+
 </body>
 </html>
